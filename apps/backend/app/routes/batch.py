@@ -7,7 +7,18 @@ from app.config import settings
 router = APIRouter()
 
 
-@router.post("/batch-rank", response_model=BatchRankResponse)
+@router.post(
+    "/batch-rank",
+    response_model=BatchRankResponse,
+    summary="Rank multiple resumes against one JD",
+    description=(
+        "Scores each resume in the `resumes` array against `jd_text` using the same "
+        "two-stage pipeline as `/analyze`, then returns them sorted by `match_score` descending.\n\n"
+        "Each item in the response includes a 1-based `rank`, `filename`, `match_score`, "
+        "and `justification`.\n\n"
+        "Useful for recruiters screening a batch of applicants in one API call."
+    ),
+)
 async def batch_rank(req: BatchRankRequest):
     results = []
     for resume in req.resumes:

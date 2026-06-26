@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: resume-matcher-api
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install uv && uv sync --no-dev --system
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    rootDir: apps/backend
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: resume-matcher-redis
+          property: connectionString
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./resume_matcher.db
+      - key: LOW_SIMILARITY_THRESHOLD
+        value: "0.25"
+      - key: CACHE_TTL
+        value: "86400"
+    healthCheckPath: /health
+
+  - type: redis
+    name: resume-matcher-redis
+    region: oregon
+    plan: free
+    maxmemoryPolicy: allkeys-lru

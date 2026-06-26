@@ -7,35 +7,58 @@ import UploadZone from "@/components/UploadZone";
 import ScoreCard from "@/components/ScoreCard";
 import KeywordChart from "@/components/KeywordChart";
 import SuggestionPanel from "@/components/SuggestionPanel";
+import ResumeHealth from "@/components/ResumeHealth";
+
+interface ScoreBreakdown {
+  semantic_similarity: number;
+  keyword_coverage:    number;
+  completeness:        number;
+}
 
 interface AnalyzeResult {
-  match_score: number;
-  justification: string;
-  role_level_match: string;
-  strengths: string[];
-  gaps: string[];
-  section_scores: { skills: number; experience: number; education: number };
-  matched_keywords: string[];
-  missing_keywords: string[];
-  ats_flags: string[];
-  cache_hit: boolean;
+  match_score:       number;
+  justification:     string;
+  role_level_match:  string;
+  strengths:         string[];
+  gaps:              string[];
+  section_scores:    { skills: number; experience: number; education: number };
+  matched_keywords:  string[];
+  missing_keywords:  string[];
+  ats_flags:         string[];
+  score_breakdown:   ScoreBreakdown | null;
+  cache_hit:         boolean;
   processing_time_ms: number;
 }
 
 interface Suggestion {
-  section: string;
+  section:  string;
   original: string | null;
   suggested: string;
-  reason: string;
+  reason:   string;
 }
 
 interface HistoryEntry {
-  id: number;
+  id:              number;
   resume_filename: string | null;
-  jd_snippet: string;
-  match_score: number;
-  justification: string;
-  created_at: string;
+  jd_snippet:      string;
+  match_score:     number;
+  justification:   string;
+  created_at:      string;
+}
+
+interface TFIDFKeyword {
+  keyword:   string;
+  jd_tf:     number;
+  score:     number;
+  in_resume: boolean;
+}
+
+interface ParsedResume {
+  sections:           Record<string, string>;
+  contact:            { email: string | null; phone: string | null; linkedin: string | null; github: string | null };
+  completeness_score: number;
+  missing_sections:   string[];
+  tfidf_keywords:     TFIDFKeyword[];
 }
 
 function safeDetail(e: any, fallback: string): string {
@@ -45,14 +68,21 @@ function safeDetail(e: any, fallback: string): string {
   return fallback;
 }
 
-function scoreColor(score: number) {
-  if (score <= 40) return "text-red-400";
-  if (score <= 70) return "text-amber-400";
-  return "text-green-400";
+function parseRetryAfter(detail: string): number | null {
+  const m = detail.match(/(\d+)s/);
+  return m ? parseInt(m[1], 10) : null;
 }
 
-const TABS = ["score", "keywords", "suggestions", "history"] as const;
+const TABS = ["score", "keywords", "health", "suggestions", "history"] as const;
 type Tab = typeof TABS[number];
+
+const TAB_LABELS: Record<Tab, string> = {
+  score:       "Score",
+  keywords:    "Keywords",
+  health:      "🩺 Health",
+  suggestions: "✨ Suggestions",
+  history:     "📋 History",
+};
 
 export default function App() {
   const { user, token, logout, loading } = useAuth();
@@ -62,13 +92,23 @@ export default function App() {
   const [resumeFile, setResumeFile]   = useState<File | null>(null);
   const [jdText, setJdText]           = useState("");
   const [result, setResult]           = useState<AnalyzeResult | null>(null);
+  const [parsedResume, setParsedResume] = useState<ParsedResume | null>(null);
   const [suggestions, setSuggestions] = useState<{ edits: Suggestion[]; keywords_to_add: string[]; summary_rewrite?: string | null }>({ edits: [], keywords_to_add: [] });
   const [history, setHistory]         = useState<HistoryEntry[]>([]);
   const [analyzing, setAnalyzing]     = useState(false);
   const [suggesting, setSuggesting]   = useState(false);
+  const [parsing, setParsing]         = useState(false);
   const [error, setError]             = useState<string | null>(null);
+  const [retryIn, setRetryIn]         = useState<number | null>(null);
   const [activeTab, setActiveTab]     = useState<Tab>("score");
   const resultRef = useRef<HTMLDivElement>(null);
+
+  function startCountdown(seconds: number) {
+    setRetryIn(seconds);
+    const iv = setInterval(() => {
+      setRetryIn((p) => { if (p === null || p <= 1) { clearInterval(iv); return null; } return p - 1; });
+    }, 1000);
+  }
 
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
 
@@ -83,11 +123,26 @@ export default function App() {
 
   useEffect(() => { if (user) fetchHistory(); }, [user, fetchHistory]);
 
+  async function fetchParsedResume(text: string, jd: string) {
+    if (!text || text.startsWith("__PDF__")) return;
+    setParsing(true);
+    try {
+      const res = await axios.post(
+        "/api/resume/parse",
+        { resume_text: text, jd_text: jd },
+        { headers: authHeaders }
+      );
+      setParsedResume(res.data);
+    } catch { /* silent — health tab just won't show */ }
+    finally { setParsing(false); }
+  }
+
   async function handleAnalyze() {
     if (!jdText.trim()) return setError("Please paste a job description.");
     if (!resumeText && !resumeFile) return setError("Please upload or paste your resume.");
     setError(null);
     setResult(null);
+    setParsedResume(null);
     setSuggestions({ edits: [], keywords_to_add: [] });
     setAnalyzing(true);
     try {
@@ -103,9 +158,16 @@ export default function App() {
       setResult(res.data);
       setActiveTab("score");
       fetchHistory();
+      // Fire parsed resume in parallel (non-blocking)
+      fetchParsedResume(resumeText, jdText);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } catch (e: any) {
-      setError(safeDetail(e, "Analysis failed. Please try again."));
+      const detail = safeDetail(e, "Analysis failed. Please try again.");
+      setError(detail);
+      if (e?.response?.status === 429) {
+        const secs = parseRetryAfter(detail);
+        if (secs) startCountdown(secs);
+      }
     } finally {
       setAnalyzing(false);
     }
@@ -115,6 +177,7 @@ export default function App() {
     if (!result || (!resumeText && !resumeFile) || !jdText) return;
     const text = resumeText || "(uploaded PDF)";
     setSuggesting(true);
+    setActiveTab("suggestions");
     try {
       const res = await axios.post(
         "/api/suggest",
@@ -122,13 +185,17 @@ export default function App() {
         { headers: authHeaders }
       );
       setSuggestions({
-        edits: res.data.suggested_edits || res.data.edits || [],
+        edits:          res.data.suggested_edits || res.data.edits || [],
         keywords_to_add: res.data.keywords_to_add || [],
         summary_rewrite: res.data.summary_rewrite,
       });
-      setActiveTab("suggestions");
     } catch (e: any) {
-      setError(safeDetail(e, "Could not fetch suggestions."));
+      const detail = safeDetail(e, "Could not fetch suggestions.");
+      setError(detail);
+      if (e?.response?.status === 429) {
+        const secs = parseRetryAfter(detail);
+        if (secs) startCountdown(secs);
+      }
     } finally {
       setSuggesting(false);
     }
@@ -155,11 +222,19 @@ export default function App() {
         <main className="max-w-5xl mx-auto px-4 py-10">
 
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-2xl md:text-3xl font-extrabold mb-1">
-              Analyse your <span className="gradient-text">resume match</span>
-            </h1>
-            <p className="text-slate-400 text-sm">Upload your resume and paste a JD to get your AI-powered score.</p>
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-extrabold mb-1">
+                Analyse your <span className="gradient-text">resume match</span>
+              </h1>
+              <p className="text-slate-400 text-sm">Upload your resume and paste a JD to get your AI-powered score.</p>
+            </div>
+            <button
+              onClick={() => router.push("/builder")}
+              className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 bg-purple-700/40 hover:bg-purple-600/50 border border-purple-700/40 text-purple-300 text-xs font-bold rounded-xl transition-all hover:scale-105"
+            >
+              🏗 Resume Builder
+            </button>
           </div>
 
           {/* Input card */}
@@ -171,8 +246,16 @@ export default function App() {
               onJdText={setJdText}
             />
             {error && (
-              <div className="mt-4 flex items-start gap-2 text-sm text-red-400 bg-red-950/40 border border-red-800/40 rounded-xl px-4 py-3">
-                <span className="flex-shrink-0 mt-0.5">⚠</span><span>{error}</span>
+              <div className="mt-4 flex items-start gap-3 bg-amber-950/30 border border-amber-700/40 rounded-xl px-4 py-3">
+                <span className="text-amber-400 flex-shrink-0 mt-0.5">{retryIn ? "⏳" : "⚠"}</span>
+                <div>
+                  <p className="text-sm text-amber-300">{error}</p>
+                  {retryIn && (
+                    <p className="text-xs text-amber-500 mt-1">
+                      Retry in <span className="font-bold text-amber-300">{retryIn}s</span> — then click Analyse again.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
             <button
@@ -190,29 +273,27 @@ export default function App() {
           {result && (
             <div ref={resultRef} className="fade-up">
               {/* Tab bar */}
-              <div className="flex items-center gap-1 mb-4 bg-white/3 rounded-xl p-1 border border-white/5">
+              <div className="flex items-center gap-1 mb-4 bg-white/3 rounded-xl p-1 border border-white/5 overflow-x-auto">
                 {TABS.map((t) => (
                   <button
                     key={t}
                     onClick={() => setActiveTab(t)}
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all capitalize ${
+                    className={`flex-shrink-0 flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                       activeTab === t ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-white"
                     }`}
                   >
-                    {t === "keywords" ? "Keywords" : t === "suggestions" ? "✨ Suggestions" : t === "history" ? "📋 History" : "Score"}
+                    {TAB_LABELS[t]}
                   </button>
                 ))}
-                {result && (
-                  <button
-                    onClick={handleSuggest}
-                    disabled={suggesting}
-                    className="ml-1 px-4 py-2 rounded-lg bg-purple-700/40 hover:bg-purple-600/50 text-purple-300 text-xs font-semibold transition-all flex items-center gap-1.5 flex-shrink-0"
-                  >
-                    {suggesting
-                      ? <span className="w-3 h-3 border border-purple-400/40 border-t-purple-300 rounded-full animate-spin" />
-                      : "✨"} Fix gaps
-                  </button>
-                )}
+                <button
+                  onClick={handleSuggest}
+                  disabled={suggesting}
+                  className="ml-1 px-4 py-2 rounded-lg bg-purple-700/40 hover:bg-purple-600/50 text-purple-300 text-xs font-semibold transition-all flex items-center gap-1.5 flex-shrink-0"
+                >
+                  {suggesting
+                    ? <span className="w-3 h-3 border border-purple-400/40 border-t-purple-300 rounded-full animate-spin" />
+                    : "✨"} Fix gaps
+                </button>
               </div>
 
               {activeTab === "score" && (
@@ -224,6 +305,7 @@ export default function App() {
                   gaps={result.gaps}
                   sectionScores={result.section_scores}
                   atsFlags={result.ats_flags}
+                  scoreBreakdown={result.score_breakdown}
                   cacheHit={result.cache_hit}
                   processingTimeMs={result.processing_time_ms}
                 />
@@ -241,6 +323,25 @@ export default function App() {
                 </div>
               )}
 
+              {activeTab === "health" && (
+                parsedResume ? (
+                  <ResumeHealth
+                    sections={parsedResume.sections}
+                    contact={parsedResume.contact}
+                    completenessScore={parsedResume.completeness_score}
+                    missingSections={parsedResume.missing_sections}
+                    tfidfKeywords={parsedResume.tfidf_keywords}
+                    loading={parsing}
+                  />
+                ) : (
+                  <div className="glass rounded-2xl p-10 text-center text-slate-500 text-sm">
+                    {parsing
+                      ? <span className="flex items-center justify-center gap-2"><span className="w-4 h-4 border-2 border-slate-700 border-t-indigo-400 rounded-full animate-spin" />Parsing resume structure…</span>
+                      : "Resume health analysis is only available for pasted text resumes (not PDF uploads)."}
+                  </div>
+                )
+              )}
+
               {activeTab === "suggestions" && (
                 suggestions.edits.length > 0 || suggestions.summary_rewrite
                   ? <SuggestionPanel edits={suggestions.edits} keywordsToAdd={suggestions.keywords_to_add} summaryRewrite={suggestions.summary_rewrite} loading={suggesting} />
@@ -251,9 +352,7 @@ export default function App() {
                     </div>
               )}
 
-              {activeTab === "history" && (
-                <HistoryPanel history={history} />
-              )}
+              {activeTab === "history" && <HistoryPanel history={history} />}
             </div>
           )}
 

@@ -1,0 +1,497 @@
+{
+  "info": {
+    "name": "AI-Powered Resume & JD Matcher",
+    "description": "Complete API collection for the Resume & JD Matcher service.\n\n## Setup\n1. Import this collection **and** the `Resume Matcher.postman_environment.json` file.\n2. Select the **Resume Matcher** environment.\n3. Run **Auth / Register** or **Auth / Login** — the token is saved automatically to `{{token}}`.\n4. All subsequent requests use `{{token}}` via the collection-level auth header.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "resume-matcher-v1"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "User registration, login, and profile endpoints.",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "    pm.collectionVariables.set('token', json.access_token);",
+                  "    pm.environment.set('token', json.access_token);",
+                  "    console.log('Token saved:', json.access_token.slice(0, 20) + '...');",
+                  "}",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has access_token', () => pm.expect(json).to.have.property('access_token'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane@example.com\",\n  \"password\": \"securepassword123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Creates a new account and returns a JWT. The token is automatically saved to `{{token}}`."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "    pm.collectionVariables.set('token', json.access_token);",
+                  "    pm.environment.set('token', json.access_token);",
+                  "    console.log('Token saved:', json.access_token.slice(0, 20) + '...');",
+                  "}",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has access_token', () => pm.expect(json).to.have.property('access_token'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane@example.com\",\n  \"password\": \"securepassword123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticates with email + password. Token is auto-saved to `{{token}}`."
+          }
+        },
+        {
+          "name": "Get Current User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Has id and email', () => {",
+                  "    pm.expect(json).to.have.property('id');",
+                  "    pm.expect(json).to.have.property('email');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Returns the profile of the authenticated user."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analyze",
+      "description": "Score a resume against a job description — text or file upload.",
+      "item": [
+        {
+          "name": "Analyze Text",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('match_score 0-100', () => {",
+                  "    pm.expect(json.match_score).to.be.a('number');",
+                  "    pm.expect(json.match_score).to.be.within(0, 100);",
+                  "});",
+                  "pm.test('Has section_scores', () => pm.expect(json).to.have.property('section_scores'));",
+                  "console.log('Score:', json.match_score, '| Cache hit:', json.cache_hit, '| Time:', json.processing_time_ms + 'ms');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resume_text\": \"John Smith\\nSenior Software Engineer\\n\\nExperience:\\n- 5 years Python development\\n- FastAPI and Django REST Framework\\n- PostgreSQL, Redis, Docker\\n- AWS EC2, S3, Lambda\\n- CI/CD with GitHub Actions\\n\\nEducation:\\nB.Sc. Computer Science, State University, 2018\",\n  \"jd_text\": \"We are looking for a Senior Python Engineer with experience in FastAPI, PostgreSQL, Docker, and AWS. Knowledge of Redis and CI/CD pipelines is a plus.\",\n  \"resume_filename\": \"john_smith.txt\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/analyze",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze"]
+            },
+            "description": "Scores plain-text resume vs JD. Uses two-stage pipeline: MiniLM cosine similarity + LLM fallback chain. Results cached for 24 h."
+          }
+        },
+        {
+          "name": "Analyze File Upload (PDF/TXT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('match_score present', () => pm.expect(json).to.have.property('match_score'));",
+                  "console.log('Score:', json.match_score, '| Cache:', json.cache_hit);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "resume_file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select a .pdf or .txt resume file"
+                },
+                {
+                  "key": "jd_text",
+                  "value": "We are looking for a Senior Python Engineer with experience in FastAPI, PostgreSQL, Docker, and AWS.",
+                  "type": "text",
+                  "description": "Job description plain text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/analyze/upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["analyze", "upload"]
+            },
+            "description": "Multipart upload. Attach a `.pdf` or `.txt` file to `resume_file`. PDF text is extracted via pdfplumber."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Suggest",
+      "description": "AI-generated resume rewrites targeting JD gaps.",
+      "item": [
+        {
+          "name": "Get Suggestions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Has suggested_edits', () => pm.expect(json.suggested_edits).to.be.an('array'));",
+                  "pm.test('Has keywords_to_add', () => pm.expect(json.keywords_to_add).to.be.an('array'));",
+                  "console.log('Edits:', json.suggested_edits.length, '| Keywords:', json.keywords_to_add);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resume_text\": \"John Smith\\nSenior Software Engineer\\n\\nExperience:\\n- 5 years Python development\\n- FastAPI and Django REST Framework\\n- PostgreSQL, Redis\\n\\nEducation:\\nB.Sc. Computer Science, 2018\",\n  \"jd_text\": \"We are looking for a Senior Python Engineer with experience in FastAPI, PostgreSQL, Docker, Kubernetes, and AWS.\",\n  \"missing_keywords\": [\"Docker\", \"Kubernetes\", \"AWS\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/suggest",
+              "host": ["{{baseUrl}}"],
+              "path": ["suggest"]
+            },
+            "description": "Pass `missing_keywords` from a prior `/analyze` response. Returns section rewrites with `original` → `suggested` diff, keywords to add, and an optional summary rewrite."
+          }
+        }
+      ]
+    },
+    {
+      "name": "History",
+      "description": "Retrieve the authenticated user's past analyses.",
+      "item": [
+        {
+          "name": "Get History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Response is array', () => pm.expect(json).to.be.an('array'));",
+                  "console.log('History items:', json.length);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/history?limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["history"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Max items to return (1–200, default 50)"
+                }
+              ]
+            },
+            "description": "Returns the current user's analysis history sorted newest-first."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Batch Rank",
+      "description": "Score and rank multiple resumes against a single JD.",
+      "item": [
+        {
+          "name": "Batch Rank Resumes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Has rankings array', () => pm.expect(json.rankings).to.be.an('array'));",
+                  "pm.test('Rankings sorted desc', () => {",
+                  "    const scores = json.rankings.map(r => r.match_score);",
+                  "    for (let i = 1; i < scores.length; i++) {",
+                  "        pm.expect(scores[i]).to.be.at.most(scores[i-1]);",
+                  "    }",
+                  "});",
+                  "console.log('Rankings:', json.rankings.map(r => r.filename + ':' + r.match_score));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jd_text\": \"We are looking for a Senior Python Engineer with experience in FastAPI, PostgreSQL, Docker, and AWS.\",\n  \"resumes\": [\n    {\n      \"filename\": \"alice.txt\",\n      \"text\": \"Alice Johnson\\n10 years Python, FastAPI, Docker, Kubernetes, AWS, PostgreSQL, Redis, Terraform\"\n    },\n    {\n      \"filename\": \"bob.txt\",\n      \"text\": \"Bob Williams\\n3 years JavaScript, React, Node.js, MongoDB — career switcher exploring backend\"\n    },\n    {\n      \"filename\": \"carol.txt\",\n      \"text\": \"Carol Davis\\n6 years Python, Django, PostgreSQL, AWS EC2 and S3, some Docker experience\"\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/batch-rank",
+              "host": ["{{baseUrl}}"],
+              "path": ["batch-rank"]
+            },
+            "description": "Score N resumes against one JD in a single call. Returns `rankings[]` sorted by `match_score` descending with a 1-based `rank`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Builder",
+      "description": "Tailor resume, generate cover letters/outreach, and export PDF.",
+      "item": [
+        {
+          "name": "Tailor Resume",
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));", "const j = pm.response.json();", "pm.test('Has tailored_resume', () => pm.expect(j.tailored_resume).to.be.a('string'));", "pm.test('Has jd_match', () => pm.expect(j.jd_match).to.have.property('match_percentage'));"], "type": "text/javascript"}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"master_resume\": \"Jane Smith\\njane@example.com\\n\\nExperience:\\nStaff Engineer | Acme | 2020-Present\\n- Built FastAPI services on AWS ECS with Docker\\n\\nSkills:\\nPython, FastAPI, PostgreSQL, Redis, Docker, AWS\",\n  \"jd_text\": \"Senior Python Engineer. FastAPI, Docker, Kubernetes, Terraform, AWS required.\",\n  \"depth\": \"keywords\"\n}", "options": {"raw": {"language": "json"}}},
+            "url": {"raw": "{{baseUrl}}/tailor", "host": ["{{baseUrl}}"], "path": ["tailor"]}
+          }
+        },
+        {
+          "name": "Generate Cover Letter",
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript"}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"resume_text\": \"Jane Smith. 7 years Python, FastAPI, AWS.\",\n  \"jd_text\": \"Senior Python Engineer. FastAPI, Docker, AWS required.\",\n  \"tone\": \"professional\"\n}", "options": {"raw": {"language": "json"}}},
+            "url": {"raw": "{{baseUrl}}/cover-letter", "host": ["{{baseUrl}}"], "path": ["cover-letter"]}
+          }
+        },
+        {
+          "name": "Generate Outreach Message",
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"], "type": "text/javascript"}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"resume_text\": \"Jane Smith. 7 years Python, FastAPI, AWS.\",\n  \"jd_text\": \"Senior Python Engineer. FastAPI, Docker, AWS required.\",\n  \"platform\": \"linkedin\"\n}", "options": {"raw": {"language": "json"}}},
+            "url": {"raw": "{{baseUrl}}/outreach", "host": ["{{baseUrl}}"], "path": ["outreach"]}
+          }
+        },
+        {
+          "name": "Export PDF",
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));", "pm.test('PDF content-type', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('pdf'));"], "type": "text/javascript"}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"template\": \"modern\",\n  \"formatting\": {\n    \"page_size\": \"A4\", \"margin_top\": 40, \"margin_bottom\": 40,\n    \"margin_left\": 50, \"margin_right\": 50, \"section_spacing\": 14,\n    \"item_spacing\": 5, \"line_height\": 14, \"compact_mode\": false,\n    \"contact_icons\": true, \"accent_color\": \"#6366f1\",\n    \"fonts\": {\"header_family\": \"Helvetica\", \"body_family\": \"Helvetica\", \"base_size\": 10, \"header_scale\": 1.4}\n  },\n  \"resume\": {\n    \"name\": \"Jane Smith\",\n    \"email\": \"jane@example.com\",\n    \"phone\": \"+1-555-0100\",\n    \"linkedin\": \"linkedin.com/in/janesmith\",\n    \"github\": \"github.com/janesmith\",\n    \"location\": \"San Francisco, CA\",\n    \"sections\": [\n      {\"type\": \"summary\", \"title\": \"Summary\", \"order\": 0, \"content\": \"Staff Python engineer with 7 years in FastAPI and AWS.\"},\n      {\"type\": \"experience\", \"title\": \"Experience\", \"order\": 1, \"content\": \"Staff Engineer | Acme Corp | 2020-Present\\n- Led microservices migration\\n- Built FastAPI services on AWS ECS\"},\n      {\"type\": \"skills\", \"title\": \"Skills\", \"order\": 2, \"content\": \"- Python, FastAPI, PostgreSQL, Redis\\n- Docker, Kubernetes, AWS\"},\n      {\"type\": \"education\", \"title\": \"Education\", \"order\": 3, \"content\": \"B.Sc. Computer Science | MIT | 2016\"}\n    ]\n  }\n}", "options": {"raw": {"language": "json"}}},
+            "url": {"raw": "{{baseUrl}}/export/pdf", "host": ["{{baseUrl}}"], "path": ["export", "pdf"]},
+            "description": "Returns binary PDF. In Postman, Send and Download to save as .pdf"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resume",
+      "description": "Parse resume sections, score completeness, and extract TF-IDF keywords.",
+      "item": [
+        {
+          "name": "Parse Resume",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Has completeness_score', () => pm.expect(json.completeness_score).to.be.a('number'));",
+                  "pm.test('Has sections', () => pm.expect(json.sections).to.be.an('object'));",
+                  "console.log('Completeness:', json.completeness_score, '| Missing:', json.missing_sections);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resume_text\": \"John Smith\\nSenior Software Engineer\\njohn@example.com | +1-555-0100 | linkedin.com/in/johnsmith\\n\\nSummary:\\nExperienced Python engineer with 5 years building FastAPI services.\\n\\nSkills:\\nPython, FastAPI, PostgreSQL, Redis, Docker, AWS\\n\\nExperience:\\nSenior Engineer, Acme Corp, 2020-present\\n- Built microservices with FastAPI and PostgreSQL\\n- Deployed on AWS ECS with Docker\\n\\nEducation:\\nB.Sc. Computer Science, State University, 2018\",\n  \"jd_text\": \"We are looking for a Senior Python Engineer with experience in FastAPI, PostgreSQL, Docker, Kubernetes, and AWS.\"",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/resume/parse",
+              "host": ["{{baseUrl}}"],
+              "path": ["resume", "parse"]
+            },
+            "description": "Parses resume into sections, scores completeness 0-100, extracts contact info, and ranks JD keywords by TF-IDF with in_resume flag."
+          }
+        },
+        {
+          "name": "Extract Keywords from JD",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Has keywords array', () => pm.expect(json.keywords).to.be.an('array'));",
+                  "console.log('Top 5 keywords:', json.keywords.slice(0,5).map(k => k.keyword + ':' + k.score));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"We are looking for a Senior Python Engineer with 5+ years experience in FastAPI, PostgreSQL, Docker, Kubernetes, Terraform, and AWS. Knowledge of Redis, Celery, and CI/CD pipelines is required. Experience with microservices architecture and REST API design is essential.\",\n  \"top_n\": 20\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/keywords/extract",
+              "host": ["{{baseUrl}}"],
+              "path": ["keywords", "extract"]
+            },
+            "description": "Extracts and ranks top keywords from any text by TF-IDF weight. Useful for analysing a JD before uploading a resume."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status ok', () => pm.expect(pm.response.json().status).to.equal('ok'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:8000/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["health"]
+            },
+            "description": "Liveness probe. No auth required."
+          }
+        }
+      ]
+    }
+  ]
+}

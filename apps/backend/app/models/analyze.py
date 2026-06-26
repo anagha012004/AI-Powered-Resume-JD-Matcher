@@ -14,6 +14,12 @@ class SectionScores(BaseModel):
     education: int = Field(ge=0, le=100)
 
 
+class ScoreBreakdown(BaseModel):
+    semantic_similarity: float = Field(description="Raw cosine similarity 0.0–1.0")
+    keyword_coverage:    int   = Field(description="% of JD keywords found in resume")
+    completeness:        int   = Field(description="Resume section completeness 0–100")
+
+
 class AnalyzeResponse(BaseModel):
     match_score: int = Field(ge=0, le=100)
     justification: str
@@ -24,5 +30,6 @@ class AnalyzeResponse(BaseModel):
     missing_keywords: list[str]
     section_scores: SectionScores
     ats_flags: list[str]
+    score_breakdown: Optional[ScoreBreakdown] = None
     cache_hit: bool
     processing_time_ms: int

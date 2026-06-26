@@ -24,11 +24,11 @@ export default function KeywordChart({ matched, missing, sectionScores, onMissin
       {/* Radar + coverage */}
       {sectionScores && (
         <div className="flex flex-col sm:flex-row gap-4 items-center">
-          <div className="w-full sm:w-64 h-52">
+          <div className="w-full sm:w-72 h-56">
             <ResponsiveContainer width="100%" height="100%">
-              <RadarChart data={radarData}>
+              <RadarChart data={radarData} outerRadius="62%" margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
                 <PolarGrid stroke="rgba(255,255,255,0.08)" />
-                <PolarAngleAxis dataKey="subject" tick={{ fill: "#94a3b8", fontSize: 11 }} />
+                <PolarAngleAxis dataKey="subject" tick={{ fill: "#94a3b8", fontSize: 11 }} tickSize={4} />
                 <Radar dataKey="score" stroke="#6366f1" fill="#6366f1" fillOpacity={0.2} strokeWidth={2} />
                 <Tooltip
                   contentStyle={{ background: "#0f0f19", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}

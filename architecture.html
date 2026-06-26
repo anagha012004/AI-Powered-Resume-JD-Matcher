@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Resume Matcher — Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0b0d14;
+      color: #c9d1e3;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      padding: 40px 20px 80px;
+    }
+    h1 {
+      text-align: center;
+      font-size: 1.75rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #818cf8, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #64748b;
+      font-size: 0.875rem;
+      margin-bottom: 48px;
+    }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 48px;
+    }
+    nav a {
+      background: #161826;
+      border: 1px solid #252840;
+      color: #818cf8;
+      text-decoration: none;
+      padding: 6px 16px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      transition: background .2s, border-color .2s;
+    }
+    nav a:hover { background: #1e2140; border-color: #818cf8; }
+    section {
+      max-width: 1200px;
+      margin: 0 auto 60px;
+      background: #111420;
+      border: 1px solid #1e2235;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .section-header {
+      padding: 20px 28px;
+      border-bottom: 1px solid #1e2235;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .badge {
+      background: #1e2140;
+      border: 1px solid #2d3158;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 0.7rem;
+      color: #818cf8;
+      font-weight: 600;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .section-header h2 { font-size: 1.1rem; font-weight: 600; color: #e2e8f0; }
+    .section-desc { font-size: 0.8rem; color: #64748b; margin-left: auto; }
+    .diagram-wrap {
+      padding: 36px 24px;
+      overflow-x: auto;
+      display: flex;
+      justify-content: center;
+    }
+    .mermaid svg { background: transparent !important; max-width: 100%; }
+  </style>
+</head>
+<body>
+
+<h1>AI-Powered Resume &amp; JD Matcher</h1>
+<p class="subtitle">Full system architecture — six Mermaid diagrams</p>
+
+<nav>
+  <a href="#system">System Overview</a>
+  <a href="#request-flow">Request Flow</a>
+  <a href="#pipeline">Scoring Pipeline</a>
+  <a href="#llm-fallback">LLM Fallback</a>
+  <a href="#data-model">Data Model</a>
+  <a href="#frontend">Frontend Tree</a>
+</nav>
+
+
+<!-- ① System Overview -->
+<section id="system">
+  <div class="section-header">
+    <span class="badge">01</span>
+    <h2>System Overview</h2>
+    <span class="section-desc">High-level component topology</span>
+  </div>
+  <div class="diagram-wrap"><div class="mermaid">
+graph LR
+    subgraph FE[Browser — Next.js 14]
+        UI[Pages: Landing / Login / Register / App]
+        Proxy[Catch-all Proxy\npages/api/path.ts]
+    end
+
+    subgraph BE[FastAPI — Python 3.12]
+        AuthR[POST /auth/register\nPOST /auth/login\nGET /auth/me]
+        AnaR[POST /analyze\nPOST /analyze/upload]
+        SugR[POST /suggest]
+        HisR[GET /history]
+        BatR[POST /batch-rank]
+    end
+
+    subgraph SVC[Services]
+        Parser[parser.py\npdfplumber + regex]
+        Embedder[embedder.py\nall-MiniLM-L6-v2]
+        Scorer[scorer.py\nprompt builder]
+        LLMSvc[llm.py\nfallback chain]
+        Suggester[suggester.py\nrewrite prompt]
+        AuthSvc[auth.py\nbcrypt + JWT]
+    end
+
+    subgraph STORE[Storage]
+        DB[(SQLite\nusers · history)]
+        RD[(Redis\nemb cache · score cache\nCelery broker)]
+    end
+
+    Celery[Celery Worker\nworker.py]
+
+    UI --> Proxy
+    Proxy -->|HTTP /api/v1/*| BE
+    AnaR --> Parser
+    AnaR --> Embedder
+    AnaR --> Scorer
+    Scorer --> LLMSvc
+    SugR --> Suggester
+    Suggester --> LLMSvc
+    Embedder --> RD
+    Scorer --> RD
+    AnaR --> DB
+    HisR --> DB
+    AuthR --> AuthSvc
+    AuthR --> DB
+    BatR --> Celery
+    Celery --> RD
+  </div></div>
+</section>
+
+
+<!-- ② Request Flow -->
+<section id="request-flow">
+  <div class="section-header">
+    <span class="badge">02</span>
+    <h2>Request Flow — POST /analyze</h2>
+    <span class="section-desc">Sequence from browser through to DB write</span>
+  </div>
+  <div class="diagram-wrap"><div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant P as Next.js Proxy
+    participant F as FastAPI
+    participant R as Redis
+    participant E as Embedder
+    participant L as LLM Chain
+    participant D as SQLite
+
+    B->>P: POST /api/analyze
+    P->>F: /api/v1/analyze + Bearer JWT
+    F->>F: Validate JWT — get_current_user()
+
+    F->>R: GET score-cache key
+    alt Cache hit
+        R-->>F: Cached result
+        F-->>B: AnalyzeResponse cache_hit=true ~5ms
+    else Cache miss
+        R-->>F: null
+        F->>E: cosine_similarity(resume, jd)
+        E->>R: GET emb cache x2
+        R-->>E: vectors or null
+        E->>R: SET emb cache TTL 24h
+        E-->>F: baseline 0.0-1.0
+
+        alt baseline below 0.25
+            F-->>B: Low-match response — zero LLM cost
+        else baseline above 0.25
+            F->>L: score_with_gemini(resume, jd, baseline)
+            L-->>F: Structured JSON
+            F->>R: SET score cache TTL 24h
+            F->>D: INSERT history row
+            F-->>B: AnalyzeResponse cache_hit=false
+        end
+    end
+  </div></div>
+</section>
+
+
+<!-- ③ Two-Stage Scoring Pipeline -->
+<section id="pipeline">
+  <div class="section-header">
+    <span class="badge">03</span>
+    <h2>Two-Stage Scoring Pipeline</h2>
+    <span class="section-desc">Local embedding gate → LLM analysis</span>
+  </div>
+  <div class="diagram-wrap"><div class="mermaid">
+flowchart TD
+    IN([Resume Text + JD Text])
+    IN --> RC{Score cached\nin Redis?}
+    RC -->|Yes| CACHED([Return cached result\n~5ms])
+
+    RC -->|No| S1
+
+    subgraph S1[Stage 1 — Local Embeddings — free, ~50ms]
+        EC{Embeddings\ncached?}
+        ENC[Encode with all-MiniLM-L6-v2\nL2-normalise to 384-dim vector\nStore in Redis TTL 24h]
+        DOT[Dot product = cosine similarity\nbaseline score 0.0 to 1.0]
+        THR{baseline\nbelow 0.25?}
+
+        EC -->|Yes| DOT
+        EC -->|No| ENC --> DOT
+        DOT --> THR
+    end
+
+    S1 --> THR
+    THR -->|Yes — skip LLM| LOW([match_score = baseline x 100\nZero API cost])
+
+    THR -->|No| S2
+
+    subgraph S2[Stage 2 — LLM Scoring]
+        PROM[Build prompt\nInject baseline as calibration signal\ntemperature = 0.1]
+        CALL[LLM Fallback Chain\nGemini 2.0 Flash\nGroq llama-3.3-70b\nOpenRouter llama-3.3-70b]
+        PARSE[Parse JSON response\nStrip markdown fences\nMap to AnalyzeResponse fields]
+    end
+
+    S2 --> PARSE
+    PARSE --> SAVE[SET score cache TTL 24h\nINSERT history row]
+    SAVE --> OUT([AnalyzeResponse\nmatch_score · justification · role_level\nstrengths · gaps · section_scores\nmatched_keywords · missing_keywords · ats_flags])
+  </div></div>
+</section>
+
+
+<!-- ④ LLM Fallback Chain -->
+<section id="llm-fallback">
+  <div class="section-header">
+    <span class="badge">04</span>
+    <h2>LLM Fallback Chain</h2>
+    <span class="section-desc">Gemini → Groq → OpenRouter with exact error classes</span>
+  </div>
+  <div class="diagram-wrap"><div class="mermaid">
+flowchart TD
+    IN([llm_call — system, prompt, temperature])
+    IN --> BLD[Build ordered provider list\nfrom configured API keys]
+
+    BLD --> G1{Gemini key set?}
+    G1 -->|No| G2
+    G1 -->|Yes| GC[Call Gemini 2.0 Flash\nvia google-generativeai SDK\nRun in thread executor]
+    GC --> GR{Parsed OK?}
+    GR -->|Yes| RET([Return dict to caller])
+    GR -->|ResourceExhausted\nor GoogleAPIError| G2
+    GR -->|JSONDecodeError| G2
+
+    G2{Groq key set?}
+    G2 -->|No| G3
+    G2 -->|Yes| GQC[Call Groq\nllama-3.3-70b-versatile\nOpenAI-compat SDK]
+    GQC --> GQR{Parsed OK?}
+    GQR -->|Yes| RET
+    GQR -->|RateLimitError\nor AuthenticationError\nor APIError| G3
+    GQR -->|JSONDecodeError| G3
+
+    G3{OpenRouter key set?}
+    G3 -->|No| FAIL
+    G3 -->|Yes| ORC[Call OpenRouter\nmeta-llama/llama-3.3-70b-instruct:free\nOpenAI-compat SDK]
+    ORC --> ORR{Parsed OK?}
+    ORR -->|Yes| RET
+    ORR -->|Any error| FAIL
+
+    FAIL([HTTP 503\nAll providers failed\nLast error in detail])
+
+    note1[_parse_json strips backtick fences\nthen runs json.loads\nJSONDecodeError falls to next provider]
+    GC -.-> note1
+    GQC -.-> note1
+    ORC -.-> note1
+  </div></div>
+</section>
+
+
+<!-- ⑤ Data Model -->
+<section id="data-model">
+  <div class="section-header">
+    <span class="badge">05</span>
+    <h2>Data Model</h2>
+    <span class="section-desc">ORM tables, Redis key schema, Pydantic API schemas</span>
+  </div>
+  <div class="diagram-wrap"><div class="mermaid">
+erDiagram
+    USERS {
+        int      id               PK
+        string   email            "UNIQUE NOT NULL"
+        string   name             "NOT NULL"
+        string   hashed_password  "bcrypt hash"
+        bool     is_active        "default true"
+        datetime created_at
+    }
+
+    HISTORY {
+        int      id               PK
+        int      user_id          FK
+        string   resume_filename  "nullable"
+        string   jd_snippet       "first 100 chars"
+        int      match_score      "0 to 100"
+        text     justification
+        datetime created_at
+    }
+
+    REDIS_EMB {
+        string   key    "emb:sha256-of-text"
+        json     value  "embedding float array 384-dim"
+        int      ttl    "86400 seconds"
+    }
+
+    REDIS_SCORE {
+        string   key    "score:sha256-resume:sha256-jd"
+        json     value  "full LLM response dict"
+        int      ttl    "86400 seconds"
+    }
+
+    USERS ||--o{ HISTORY : "owns"
+  </div></div>
+</section>
+
+
+<!-- ⑥ Frontend Component Tree -->
+<section id="frontend">
+  <div class="section-header">
+    <span class="badge">06</span>
+    <h2>Frontend Component &amp; Page Tree</h2>
+    <span class="section-desc">Next.js pages, components, auth context, proxy wiring</span>
+  </div>
+  <div class="diagram-wrap"><div class="mermaid">
+flowchart TD
+    APP[_app.tsx\nAuthProvider + Global CSS]
+
+    APP --> IDX[index.tsx\nLanding — Hero, Pipeline, Features, CTA]
+    APP --> LGN[login.tsx\nAuthForm — POST /auth/login]
+    APP --> REG[register.tsx\nAuthForm — POST /auth/register]
+    APP --> DASH[app.tsx\nProtected Dashboard]
+
+    subgraph DASH[app.tsx — Protected Dashboard]
+        ST[Score Tab]
+        KT[Keywords Tab]
+        SGT[Suggestions Tab]
+        HT[History Tab]
+    end
+
+    ST --> UZ[UploadZone.tsx\nreact-dropzone — PDF, TXT, paste]
+    ST --> SC[ScoreCard.tsx\nRadial gauge, verdict badge, section bars]
+    KT --> KC[KeywordChart.tsx\nRecharts radar, matched pills, missing pills]
+    SGT --> SP[SuggestionPanel.tsx\nDiff cards with strikethrough rewrites]
+    HT --> HL[History list — GET /history]
+
+    subgraph CTX[AuthContext.tsx]
+        JWT[JWT stored in localStorage]
+        BOOT[Bootstrap — GET /auth/me on load]
+        FNS[login / logout / register helpers]
+    end
+
+    DASH -. useContext .-> CTX
+    LGN  -. useContext .-> CTX
+    REG  -. useContext .-> CTX
+
+    DASH -->|fetch /api/*| PXY[pages/api/path.ts\nhttp proxy — bodyParser false\nstreams multipart — timeout 120s]
+    PXY -->|NEXT_PUBLIC_API_URL /api/v1/*| API[(FastAPI Backend)]
+  </div></div>
+</section>
+
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      background:             '#111420',
+      primaryColor:           '#1e2140',
+      primaryTextColor:       '#c9d1e3',
+      primaryBorderColor:     '#3d4270',
+      lineColor:              '#5b6394',
+      secondaryColor:         '#161826',
+      tertiaryColor:          '#0d0f1c',
+      edgeLabelBackground:    '#111420',
+      clusterBkg:             '#13162a',
+      clusterBorder:          '#2d3158',
+      titleColor:             '#818cf8',
+      nodeBorder:             '#3d4270',
+      mainBkg:                '#1e2140',
+      actorBkg:               '#1e2140',
+      actorBorder:            '#818cf8',
+      actorTextColor:         '#c9d1e3',
+      activationBkgColor:     '#252840',
+      activationBorderColor:  '#818cf8',
+      signalColor:            '#38bdf8',
+      signalTextColor:        '#c9d1e3',
+      labelBoxBkgColor:       '#1e2140',
+      labelBoxBorderColor:    '#2d3158',
+      labelTextColor:         '#c9d1e3',
+      loopTextColor:          '#c9d1e3',
+      noteBkgColor:           '#1e2140',
+      noteBorderColor:        '#3d4270',
+      noteTextColor:          '#94a3b8',
+    },
+    flowchart: { curve: 'monotoneX', padding: 24, nodeSpacing: 50, rankSpacing: 60 },
+    sequence:  { mirrorActors: false, messageAlign: 'center', boxMargin: 10 },
+    er:        { layoutDirection: 'LR', entityPadding: 15 },
+  });
+</script>
+</body>
+</html>

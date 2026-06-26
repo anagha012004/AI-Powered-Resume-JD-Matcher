@@ -8,7 +8,17 @@ from app.services.auth import hash_password, verify_password, create_access_toke
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register", response_model=TokenResponse, status_code=201)
+@router.post(
+    "/register",
+    response_model=TokenResponse,
+    status_code=201,
+    summary="Register a new user",
+    description=(
+        "Creates a new user account with a bcrypt-hashed password and returns a "
+        "signed JWT (HS256, 7-day expiry). The token can be used immediately as a "
+        "`Bearer` credential on all protected endpoints."
+    ),
+)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(User).where(User.email == req.email))
     if existing.scalar_one_or_none():
@@ -20,7 +30,15 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     return TokenResponse(access_token=create_access_token(user.id, user.email))
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="Login and get a JWT",
+    description=(
+        "Validates email + password and returns a fresh JWT. "
+        "Returns **401** if credentials are invalid."
+    ),
+)
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
@@ -29,6 +47,11 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     return TokenResponse(access_token=create_access_token(user.id, user.email))
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get(
+    "/me",
+    response_model=UserResponse,
+    summary="Get current user",
+    description="Returns the profile of the user identified by the `Authorization: Bearer` token.",
+)
 async def me(user: User = Depends(get_current_user)):
     return user

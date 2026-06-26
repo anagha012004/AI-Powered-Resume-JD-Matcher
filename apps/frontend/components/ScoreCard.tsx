@@ -3,6 +3,12 @@ import { RadialBarChart, RadialBar, PolarAngleAxis, ResponsiveContainer } from "
 
 interface SectionScores { skills: number; experience: number; education: number }
 
+interface ScoreBreakdown {
+  semantic_similarity: number;
+  keyword_coverage:    number;
+  completeness:        number;
+}
+
 interface Props {
   score: number;
   justification: string;
@@ -11,6 +17,7 @@ interface Props {
   gaps: string[];
   sectionScores: SectionScores;
   atsFlags: string[];
+  scoreBreakdown?: ScoreBreakdown | null;
   cacheHit: boolean;
   processingTimeMs: number;
 }
@@ -62,7 +69,7 @@ function useCountUp(target: number, duration = 1200) {
 
 export default function ScoreCard({
   score, justification, roleLevelMatch, strengths, gaps,
-  sectionScores, atsFlags, cacheHit, processingTimeMs,
+  sectionScores, atsFlags, scoreBreakdown, cacheHit, processingTimeMs,
 }: Props) {
   const color = scoreColor(score);
   const animatedScore = useCountUp(score);
@@ -144,6 +151,27 @@ export default function ScoreCard({
           <ul className="flex flex-col gap-1">
             {atsFlags.map((f, i) => <li key={i} className="text-xs text-amber-300">· {f}</li>)}
           </ul>
+        </div>
+      )}
+
+      {/* Score breakdown */}
+      {scoreBreakdown && (
+        <div className="bg-white/3 border border-white/6 rounded-xl p-3">
+          <p className="text-xs font-semibold text-slate-400 mb-2">📊 Score Breakdown</p>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <div className="text-base font-bold text-indigo-400">{Math.round(scoreBreakdown.semantic_similarity * 100)}%</div>
+              <div className="text-[10px] text-slate-500">Semantic</div>
+            </div>
+            <div>
+              <div className="text-base font-bold text-purple-400">{scoreBreakdown.keyword_coverage}%</div>
+              <div className="text-[10px] text-slate-500">Keywords</div>
+            </div>
+            <div>
+              <div className="text-base font-bold text-pink-400">{scoreBreakdown.completeness}%</div>
+              <div className="text-[10px] text-slate-500">Completeness</div>
+            </div>
+          </div>
         </div>
       )}
     </div>
