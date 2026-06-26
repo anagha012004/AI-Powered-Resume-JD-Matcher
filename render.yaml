@@ -21,12 +21,22 @@ services:
           name: resume-matcher-redis
           property: connectionString
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./resume_matcher.db
+        fromService:
+          type: pserv
+          name: resume-matcher-db
+          property: connectionString
       - key: LOW_SIMILARITY_THRESHOLD
         value: "0.25"
       - key: CACHE_TTL
         value: "86400"
     healthCheckPath: /health
+
+  - type: pserv
+    name: resume-matcher-db
+    region: oregon
+    plan: free
+    databaseName: resume_matcher
+    databaseUser: resume_matcher_user
 
   - type: redis
     name: resume-matcher-redis
