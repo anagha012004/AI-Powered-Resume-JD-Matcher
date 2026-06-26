@@ -108,50 +108,51 @@
   <div class="diagram-wrap"><div class="mermaid">
 graph LR
     subgraph FE[Browser — Next.js 14]
-        UI[Pages: Landing / Login / Register / App]
+        UI[Pages: Landing / Login / Register / App / Builder]
         Proxy[Catch-all Proxy\npages/api/path.ts]
     end
 
     subgraph BE[FastAPI — Python 3.12]
-        AuthR[POST /auth/register\nPOST /auth/login\nGET /auth/me]
-        AnaR[POST /analyze\nPOST /analyze/upload]
-        SugR[POST /suggest]
-        HisR[GET /history]
-        BatR[POST /batch-rank]
+        AuthR[/auth/register\n/auth/login\n/auth/me]
+        AnaR[/analyze\n/analyze/upload]
+        ResR[/resume/parse\n/keywords/extract]
+        SugR[/suggest]
+        TlrR[/tailor\n/cover-letter\n/outreach]
+        PdfR[/export/pdf]
+        HisR[/history]
+        BatR[/batch-rank]
     end
 
     subgraph SVC[Services]
         Parser[parser.py\npdfplumber + regex]
+        ResParser[resume_parser.py\nsection detector + TF-IDF]
         Embedder[embedder.py\nall-MiniLM-L6-v2]
         Scorer[scorer.py\nprompt builder]
         LLMSvc[llm.py\nfallback chain]
         Suggester[suggester.py\nrewrite prompt]
+        Tailor[tailor.py\ntailor + cover-letter + outreach]
+        PDFBld[pdf_builder.py\nReportLab 4 templates]
         AuthSvc[auth.py\nbcrypt + JWT]
     end
 
     subgraph STORE[Storage]
-        DB[(SQLite\nusers · history)]
-        RD[(Redis\nemb cache · score cache\nCelery broker)]
+        DB[(SQLite / PostgreSQL\nusers · history)]
+        RD[(Redis\nemb cache · score cache\n24h TTL)]
     end
-
-    Celery[Celery Worker\nworker.py]
 
     UI --> Proxy
     Proxy -->|HTTP /api/v1/*| BE
-    AnaR --> Parser
-    AnaR --> Embedder
-    AnaR --> Scorer
+    AnaR --> Parser & Embedder & Scorer
     Scorer --> LLMSvc
-    SugR --> Suggester
-    Suggester --> LLMSvc
+    SugR --> Suggester --> LLMSvc
+    TlrR --> Tailor --> LLMSvc
+    ResR --> ResParser
+    PdfR --> PDFBld
     Embedder --> RD
     Scorer --> RD
-    AnaR --> DB
-    HisR --> DB
-    AuthR --> AuthSvc
-    AuthR --> DB
-    BatR --> Celery
-    Celery --> RD
+    AnaR & HisR --> DB
+    AuthR --> AuthSvc --> DB
+    BatR --> Embedder & Scorer
   </div></div>
 </section>
 
@@ -193,7 +194,7 @@ sequenceDiagram
         alt baseline below 0.25
             F-->>B: Low-match response — zero LLM cost
         else baseline above 0.25
-            F->>L: score_with_gemini(resume, jd, baseline)
+            F->>L: score_with_llm(resume, jd, baseline)
             L-->>F: Structured JSON
             F->>R: SET score cache TTL 24h
             F->>D: INSERT history row
@@ -230,8 +231,7 @@ flowchart TD
         DOT --> THR
     end
 
-    S1 --> THR
-    THR -->|Yes — skip LLM| LOW([match_score = baseline x 100\nZero API cost])
+    THR -->|Yes — skip LLM| LOW([match_score = baseline × 100\nZero API cost])
 
     THR -->|No| S2
 
@@ -253,7 +253,7 @@ flowchart TD
   <div class="section-header">
     <span class="badge">04</span>
     <h2>LLM Fallback Chain</h2>
-    <span class="section-desc">Gemini → Groq → OpenRouter with exact error classes</span>
+    <span class="section-desc">Gemini → Groq → OpenRouter with retry-after extraction</span>
   </div>
   <div class="diagram-wrap"><div class="mermaid">
 flowchart TD
@@ -277,13 +277,18 @@ flowchart TD
     GQR -->|JSONDecodeError| G3
 
     G3{OpenRouter key set?}
-    G3 -->|No| FAIL
+    G3 -->|No| WAIT
     G3 -->|Yes| ORC[Call OpenRouter\nmeta-llama/llama-3.3-70b-instruct:free\nOpenAI-compat SDK]
     ORC --> ORR{Parsed OK?}
     ORR -->|Yes| RET
-    ORR -->|Any error| FAIL
+    ORR -->|429 RateLimit| WAIT
 
-    FAIL([HTTP 503\nAll providers failed\nLast error in detail])
+    WAIT[Extract retry_after_seconds\nfrom error body\ncap at 35s — wait — retry once]
+    WAIT --> RETRY{Retry\nsucceeded?}
+    RETRY -->|Yes| RET
+    RETRY -->|No| FAIL
+
+    FAIL([HTTP 503\nAll providers exhausted\nretry_after_seconds in response\nFrontend shows countdown timer])
 
     note1[_parse_json strips backtick fences\nthen runs json.loads\nJSONDecodeError falls to next provider]
     GC -.-> note1
@@ -353,19 +358,33 @@ flowchart TD
     APP --> LGN[login.tsx\nAuthForm — POST /auth/login]
     APP --> REG[register.tsx\nAuthForm — POST /auth/register]
     APP --> DASH[app.tsx\nProtected Dashboard]
+    APP --> BLD[builder.tsx\nProtected Builder Workflow]
 
-    subgraph DASH[app.tsx — Protected Dashboard]
+    subgraph DASHTABS[app.tsx — Dashboard Tabs]
         ST[Score Tab]
         KT[Keywords Tab]
+        HLT[Health Tab]
         SGT[Suggestions Tab]
         HT[History Tab]
     end
 
     ST --> UZ[UploadZone.tsx\nreact-dropzone — PDF, TXT, paste]
-    ST --> SC[ScoreCard.tsx\nRadial gauge, verdict badge, section bars]
+    ST --> SC[ScoreCard.tsx\nRadial gauge, verdict badge, section bars\nscore breakdown — semantic · keyword · completeness]
     KT --> KC[KeywordChart.tsx\nRecharts radar, matched pills, missing pills]
-    SGT --> SP[SuggestionPanel.tsx\nDiff cards with strikethrough rewrites]
+    HLT --> RH[ResumeHealth.tsx\nCompleteness ring, section accordion\nTF-IDF keyword bar chart]
+    SGT --> SP[SuggestionPanel.tsx\nDiff cards with strikethrough rewrites\nCopy all button]
     HT --> HL[History list — GET /history]
+
+    subgraph BLDTABS[builder.tsx — Builder Tabs]
+        IT[Input Tab\nMaster resume + JD + depth selector]
+        JDT[JD Match Tab]
+        BT[Builder Tab]
+        CLT[Cover Letter Tab]
+    end
+
+    JDT --> JDM[JDMatch.tsx\nMatch ring, keyword pills\nside-by-side highlighted comparison]
+    BT --> RB[ResumeBuilder.tsx\nSection editor — add, reorder, delete\n4 template switcher, formatting sidebar\nPDF export — POST /export/pdf]
+    CLT --> CL[CoverLetter.tsx\nCover letter — 3 tones\nOutreach — LinkedIn, Email, Cold Email\nlive char counter]
 
     subgraph CTX[AuthContext.tsx]
         JWT[JWT stored in localStorage]
@@ -374,10 +393,18 @@ flowchart TD
     end
 
     DASH -. useContext .-> CTX
+    BLD  -. useContext .-> CTX
     LGN  -. useContext .-> CTX
     REG  -. useContext .-> CTX
 
-    DASH -->|fetch /api/*| PXY[pages/api/path.ts\nhttp proxy — bodyParser false\nstreams multipart — timeout 120s]
+    subgraph RANK[RankingsTable.tsx]
+        RT[Batch rank leaderboard\nPOST /batch-rank]
+    end
+
+    DASH --> RANK
+
+    DASH -->|fetch /api/*| PXY[pages/api/path.ts\nhttp-proxy — bodyParser false\nstreams multipart — timeout 120s]
+    BLD  -->|fetch /api/*| PXY
     PXY -->|NEXT_PUBLIC_API_URL /api/v1/*| API[(FastAPI Backend)]
   </div></div>
 </section>

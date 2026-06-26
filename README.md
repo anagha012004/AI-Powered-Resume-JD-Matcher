@@ -63,54 +63,20 @@
 
 ## System Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Browser  (Next.js 14)                         │
-│  Landing · Login · Register · Dashboard (/app) · Builder (/builder)│
-│  POST /api/[...path]  ←  catch-all proxy (avoids CORS)          │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ HTTP
-┌──────────────────────────▼──────────────────────────────────────┐
-│                  FastAPI  (Python 3.12)                          │
-│                                                                  │
-│  /api/v1/auth/*          JWT register / login / me              │
-│  /api/v1/analyze         Two-stage resume scoring               │
-│  /api/v1/analyze/upload  PDF/TXT file upload scoring            │
-│  /api/v1/resume/parse    Section parse + TF-IDF keywords        │
-│  /api/v1/keywords/extract TF-IDF keyword ranking               │
-│  /api/v1/suggest         AI bullet rewrites                     │
-│  /api/v1/tailor          Master resume → targeted version       │
-│  /api/v1/cover-letter    Cover letter generation                │
-│  /api/v1/outreach        LinkedIn / email outreach              │
-│  /api/v1/export/pdf      ReportLab PDF (4 templates)           │
-│  /api/v1/history         Per-user analysis history              │
-│  /api/v1/batch-rank      Rank N resumes vs 1 JD                │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  STAGE 1 — Local Embeddings  (~50ms, free)              │    │
-│  │  sentence-transformers  all-MiniLM-L6-v2               │    │
-│  │  Cosine similarity → if < 0.25 → return (0 API cost)   │    │
-│  └────────────────────────┬───────────────────────────────┘    │
-│                           │ baseline ≥ 0.25                     │
-│  ┌────────────────────────▼───────────────────────────────┐    │
-│  │  STAGE 2 — LLM Fallback Chain                           │    │
-│  │  1. Gemini 2.0 Flash  (primary, temp=0.1)               │    │
-│  │     ↓ quota / error                                     │    │
-│  │  2. Groq  llama-3.3-70b-versatile                       │    │
-│  │     ↓ rate-limit / auth error                           │    │
-│  │  3. OpenRouter  llama-3.3-70b-instruct:free             │    │
-│  │     ↓ all rate-limited → wait retry_after → retry once  │    │
-│  └────────────────────────────────────────────────────────┘    │
-│                                                                  │
-│  SQLite (dev) / PostgreSQL (prod) via SQLAlchemy async ORM      │
-│  Tables: users · history                                         │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                  ┌────────▼────────┐
-                  │     Redis        │
-                  │  emb:{sha256}    │  24h TTL
-                  │  score:{sha256}  │  24h TTL
-                  └─────────────────┘
+```mermaid
+graph TD
+    Browser["Browser — Next.js 14\nLanding · Login · Register · /app · /builder\nPOST /api/[...path] catch-all proxy"]
+    FastAPI["FastAPI — Python 3.12\n/api/v1/auth · /api/v1/analyze · /api/v1/tailor\n/api/v1/suggest · /api/v1/cover-letter · /api/v1/outreach\n/api/v1/export/pdf · /api/v1/history · /api/v1/batch-rank"]
+    Stage1["Stage 1 — Local Embeddings — free, ~50ms\nall-MiniLM-L6-v2 cosine similarity\nbelow 0.25 threshold → return, zero LLM cost"]
+    Stage2["Stage 2 — LLM Fallback Chain\n1. Gemini 2.0 Flash\n2. Groq llama-3.3-70b-versatile\n3. OpenRouter llama-3.3-70b-instruct:free"]
+    DB["SQLite dev / PostgreSQL prod\nSQLAlchemy async ORM\nTables: users · history"]
+    Redis["Redis\nemb:{sha256} — 24h TTL\nscore:{sha256} — 24h TTL"]
+
+    Browser -->|HTTP| FastAPI
+    FastAPI --> Stage1
+    Stage1 -->|baseline above 0.25| Stage2
+    FastAPI --> DB
+    FastAPI <-->|cache read/write| Redis
 ```
 
 ---
@@ -120,8 +86,80 @@
 ### Two-Stage Pipeline
 MiniLM cosine similarity gates every request. Below 0.25 → return instantly, zero LLM cost. Above → full Gemini analysis. Saves ~80% API quota in practice.
 
+```mermaid
+flowchart TD
+    Input["Resume Text + JD Text"]
+    CacheCheck{"Score cached\nin Redis?"}
+    CacheHit["Return cached result\n~5ms"]
+    Encode["Encode with all-MiniLM-L6-v2\nL2-normalise to 384-dim vector"]
+    EmbCache{"Embeddings\ncached?"}
+    EmbStore["Store in Redis TTL 24h"]
+    Dot["Dot product = cosine similarity\nbaseline score 0.0 to 1.0"]
+    Gate{"baseline\nbelow 0.25?"}
+    LowMatch["match_score = baseline x 100\nZero API cost"]
+    LLM["LLM Fallback Chain"]
+    Parse["Parse JSON response\nMap to AnalyzeResponse fields"]
+    CacheWrite["SET score cache TTL 24h"]
+    DB["INSERT history row"]
+    Response["AnalyzeResponse\nmatch_score · justification · role_level\nstrengths · gaps · section_scores\nmatched_keywords · missing_keywords · ats_flags"]
+
+    Input --> CacheCheck
+    CacheCheck -->|hit| CacheHit
+    CacheCheck -->|miss| EmbCache
+    EmbCache -->|yes| Dot
+    EmbCache -->|no| Encode
+    Encode --> EmbStore --> Dot
+    Dot --> Gate
+    Gate -->|yes| LowMatch
+    Gate -->|no| LLM
+    LLM --> Parse --> CacheWrite --> DB --> Response
+    LowMatch --> DB
+```
+
 ### LLM Fallback Chain with Smart Retry
 All three providers (Gemini, Groq, OpenRouter) are tried in order. On 429, `retry_after_seconds` is extracted from the error body, the minimum wait is observed (capped at 35s), then the chain retries once before returning a clean error with a frontend countdown timer.
+
+```mermaid
+flowchart TD
+    Call["llm_call — system, prompt, temperature"]
+    Build["Build ordered provider list\nfrom configured API keys"]
+    GeminiKey{"Gemini key set?"}
+    Gemini["Call Gemini 2.0 Flash\nvia google-generativeai SDK"]
+    GeminiOK{"Parsed OK?"}
+    GroqKey{"Groq key set?"}
+    Groq["Call Groq\nllama-3.3-70b-versatile"]
+    GroqOK{"Parsed OK?"}
+    GroqErr{"RateLimitError\nor APIError?"}
+    Retry["Extract retry_after_seconds\ncap at 35s — wait — retry once"]
+    RetryOK{"Retry\nsucceeded?"}
+    OpenKey{"OpenRouter key set?"}
+    Open["Call OpenRouter\nllama-3.3-70b-instruct:free"]
+    OpenOK{"Parsed OK?"}
+    Return["Return dict to caller"]
+    Exhausted["HTTP 503\nAll providers exhausted\nretry_after_seconds in response"]
+
+    Call --> Build --> GeminiKey
+    GeminiKey -->|yes| Gemini
+    GeminiKey -->|no| GroqKey
+    Gemini --> GeminiOK
+    GeminiOK -->|yes| Return
+    GeminiOK -->|no| GroqKey
+    GroqKey -->|yes| Groq
+    GroqKey -->|no| OpenKey
+    Groq --> GroqOK
+    GroqOK -->|yes| Return
+    GroqOK -->|no| GroqErr
+    GroqErr -->|yes| Retry
+    GroqErr -->|no| OpenKey
+    Retry --> RetryOK
+    RetryOK -->|yes| Return
+    RetryOK -->|no| OpenKey
+    OpenKey -->|yes| Open
+    OpenKey -->|no| Exhausted
+    Open --> OpenOK
+    OpenOK -->|yes| Return
+    OpenOK -->|no| Exhausted
+```
 
 ### TF-IDF Keyword Scoring
 Pure Python implementation (no spaCy) — ranks JD keywords by term frequency × IDF-like penalty for terms already in the resume. Highest-scored keywords = most important JD terms you're *missing*.
