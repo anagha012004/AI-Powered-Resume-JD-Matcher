@@ -36,8 +36,10 @@ function highlightKeywords(text: string, keywords: HighlightedKeyword[]): string
   const sorted = [...keywords].sort((a, b) => b.keyword.length - a.keyword.length);
   for (const kw of sorted) {
     const esc = kw.keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const color = kw.found ? "bg-emerald-800/60 text-emerald-300 rounded px-0.5" : "bg-red-900/50 text-red-300 rounded px-0.5";
-    out = out.replace(new RegExp(`\\b(${esc})\\b`, "gi"), `<mark class="${color}">$1</mark>`);
+    const style = kw.found
+      ? "background:rgba(6,78,59,0.6);color:#6ee7b7;border-radius:3px;padding:0 2px;"
+      : "background:rgba(127,29,29,0.5);color:#fca5a5;border-radius:3px;padding:0 2px;";
+    out = out.replace(new RegExp(`\\b(${esc})\\b`, "gi"), `<mark style="${style}">$1</mark>`);
   }
   return out;
 }
