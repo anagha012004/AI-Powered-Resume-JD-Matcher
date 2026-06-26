@@ -15,6 +15,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Resume & JD Matcher API",
     version="1.2.0",
     description=DESCRIPTION,
