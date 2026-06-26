@@ -4,9 +4,8 @@ services:
     runtime: python
     region: oregon
     plan: free
-    pythonVersion: "3.12.10"
-    buildCommand: cd apps/backend && pip install uv && UV_PYTHON=$(which python3) uv sync --no-dev --no-python-downloads && .venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-    startCommand: cd apps/backend && .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: cd apps/backend && pip install -r requirements.txt && python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+    startCommand: cd apps/backend && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: GEMINI_API_KEY
         sync: false
