@@ -1,6 +1,6 @@
 import Head from "next/head";
 import { useRouter } from "next/router";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useAuth } from "@/components/AuthContext";
 import JDMatch from "@/components/JDMatch";
@@ -50,7 +50,7 @@ export default function BuilderPage() {
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
-  function startCountdown(set: (v: number | null) => void, seconds: number) {
+  function startCountdown(set: React.Dispatch<React.SetStateAction<number | null>>, seconds: number) {
     set(seconds);
     const iv = setInterval(() => {
       set((p) => { if (p === null || p <= 1) { clearInterval(iv); return null; } return p - 1; });
