@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.env
+resume_matcher.db
+
+# Node
+node_modules/
+.next/
+.env.local
+
+# General
+.DS_Store
+*.log

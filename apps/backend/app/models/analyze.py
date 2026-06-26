@@ -1,0 +1,25 @@
+from pydantic import BaseModel, Field
+from typing import Optional
+
+
+class AnalyzeRequest(BaseModel):
+    resume_text: str
+    jd_text: str
+    resume_filename: Optional[str] = None
+
+
+class SectionScores(BaseModel):
+    skills: int = Field(ge=0, le=100)
+    experience: int = Field(ge=0, le=100)
+    education: int = Field(ge=0, le=100)
+
+
+class AnalyzeResponse(BaseModel):
+    match_score: int = Field(ge=0, le=100)
+    justification: str
+    matched_keywords: list[str]
+    missing_keywords: list[str]
+    section_scores: SectionScores
+    ats_flags: list[str]
+    cache_hit: bool
+    processing_time_ms: int
