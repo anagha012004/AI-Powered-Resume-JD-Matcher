@@ -17,6 +17,9 @@ class SectionScores(BaseModel):
 class AnalyzeResponse(BaseModel):
     match_score: int = Field(ge=0, le=100)
     justification: str
+    role_level_match: str = "Unknown"
+    strengths: list[str] = []
+    gaps: list[str] = []
     matched_keywords: list[str]
     missing_keywords: list[str]
     section_scores: SectionScores

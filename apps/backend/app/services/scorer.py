@@ -1,8 +1,8 @@
-from app.services.llm import llm_call, _parse_json  # re-export _parse_json for suggester
+from app.services.llm import llm_call
 
 SYSTEM = (
-    "You are an expert ATS (Applicant Tracking System) and technical recruiter. "
-    "Analyze resumes against job descriptions with precision."
+    "You are an expert ATS (Applicant Tracking System) and senior technical recruiter. "
+    "Analyze resumes against job descriptions with precision and nuance."
 )
 
 SCORE_PROMPT = """Analyze the following resume against the job description.
@@ -13,12 +13,15 @@ RESUME:
 JOB DESCRIPTION:
 {jd_text}
 
-SEMANTIC SIMILARITY SCORE (pre-computed, use as a reference signal): {baseline_score}
+SEMANTIC SIMILARITY SCORE (pre-computed cosine similarity, use as a calibration signal): {baseline_score}
 
 Return ONLY a valid JSON object with NO markdown, NO explanation outside the JSON:
 {{
   "match_score": <integer 0-100>,
-  "justification": "<2-3 sentence explanation of the score>",
+  "justification": "<2-3 sentence explanation of the overall score>",
+  "role_level_match": "<one of: Perfect | Strong | Partial | Weak>",
+  "strengths": ["<key strength 1>", "<key strength 2>", "<key strength 3>"],
+  "gaps": ["<key gap 1>", "<key gap 2>"],
   "matched_keywords": ["<keyword1>", "<keyword2>"],
   "missing_keywords": ["<keyword1>", "<keyword2>"],
   "section_scores": {{
