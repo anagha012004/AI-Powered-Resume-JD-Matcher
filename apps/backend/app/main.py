@@ -14,11 +14,13 @@ async def lifespan(app: FastAPI):
     import logging
     logger = logging.getLogger("uvicorn")
     try:
-        logger.info(f"DB URL prefix: {settings.database_url[:30]}")
+        db_prefix = settings.database_url[:60]
+        logger.info(f"DATABASE_URL prefix: {db_prefix}")
         await init_db()
         logger.info("Database tables created/verified successfully")
     except Exception as e:
         logger.error(f"init_db failed: {e}")
+        logger.error(f"Full DATABASE_URL used: {settings.database_url[:80]}")
         raise
     yield
 

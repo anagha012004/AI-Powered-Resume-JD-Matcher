@@ -1,5 +1,7 @@
 # AI-Powered Resume & JD Matcher
 
+**Live demo: [ai-powered-resume-jd-matcher-nyq5-cyan.vercel.app](https://ai-powered-resume-jd-matcher-nyq5-cyan.vercel.app)**
+
 > Upload a master resume, paste a JD, pick a tailoring depth — get a targeted resume, JD match comparison, AI rewrites, cover letter, outreach message, and a PDF export. Powered by a two-stage pipeline of local embeddings + cascading LLM fallback (Gemini 2.0 Flash → Groq → OpenRouter).
 
 ---
@@ -45,19 +47,14 @@
 
 ## Demo Screens
 
-| Screen | Description |
-|--------|-------------|
-| `/` | Landing: hero with live score demo, pipeline diagram, feature cards, stats |
-| `/register` & `/login` | JWT auth with animated glass card UI |
-| `/app` — Score tab | Animated radial gauge, verdict badge, section bars, score breakdown |
-| `/app` — Keywords tab | Radar chart + keyword gap pills (click to fix) |
-| `/app` — Health tab | Completeness ring, section accordion, TF-IDF keyword bar chart |
-| `/app` — Suggestions tab | Diff cards with copy-to-clipboard, "Copy all" button |
-| `/app` — History tab | Per-user table sorted newest-first |
-| `/builder` — Input tab | Master resume + JD textareas + tailoring depth selector |
-| `/builder` — JD Match tab | Match % ring, keyword pills, side-by-side highlighted comparison |
-| `/builder` — Builder tab | Section editor + formatting sidebar + 4 template switcher + PDF export |
-| `/builder` — Cover Letter tab | Cover letter + outreach with tone/platform picker |
+| Screen | Screenshot |
+|--------|------------|
+| Landing page — hero, pipeline diagram, feature cards | ![Landing](demo/LandingPage.png) |
+| Input tab — resume + JD upload, tailoring depth | ![Input](demo/input.png) |
+| Score tab — radial gauge, verdict badge, section bars | ![Score](demo/Analysis.png) |
+| Resume Analysis — completeness ring, section accordion | ![Health](demo/Resume%20Analysis.png) |
+| Keywords tab — radar chart + keyword gap pills | ![Keywords](demo/Keyword%20analysis.png) |
+| JD Match tab — side-by-side highlighted comparison | ![JD Match](demo/jd%20match%20comparison.png) |
 
 ---
 
@@ -69,7 +66,7 @@ graph TD
     FastAPI["FastAPI — Python 3.12\n/api/v1/auth · /api/v1/analyze · /api/v1/tailor\n/api/v1/suggest · /api/v1/cover-letter · /api/v1/outreach\n/api/v1/export/pdf · /api/v1/history · /api/v1/batch-rank"]
     Stage1["Stage 1 — Local Embeddings — free, ~50ms\nall-MiniLM-L6-v2 cosine similarity\nbelow 0.25 threshold → return, zero LLM cost"]
     Stage2["Stage 2 — LLM Fallback Chain\n1. Gemini 2.0 Flash\n2. Groq llama-3.3-70b-versatile\n3. OpenRouter llama-3.3-70b-instruct:free"]
-    DB["SQLite dev / PostgreSQL prod\nSQLAlchemy async ORM\nTables: users · history"]
+    DB["Neon PostgreSQL (prod) / SQLite (dev)\nSQLAlchemy async ORM\nTables: users · history"]
     Redis["Redis\nemb:{sha256} — 24h TTL\nscore:{sha256} — 24h TTL"]
 
     Browser -->|HTTP| FastAPI
@@ -170,8 +167,8 @@ Regex heading detector covering 10 section types. Weighted completeness score (e
 ### PDF Generation
 ReportLab with four templates. Two-column templates use a `Table` flowable to place skills/education in a sidebar. Full formatting controls wired to the frontend builder.
 
-### SQLite → PostgreSQL-Ready
-One env var swap: `DATABASE_URL=postgresql+asyncpg://...`. `create_all` handles schema on startup.
+### Database
+SQLite for local dev, Neon PostgreSQL for production. One env var swap: `DATABASE_URL=postgresql://...`. asyncpg handles the async driver; `create_all` on startup creates the schema automatically. Connection pool capped at 5 + 2 overflow to stay within Neon free tier limits.
 
 ---
 
@@ -222,6 +219,7 @@ AI-Powered-Resume-JD-Matcher/
 │       │   └── register.tsx
 │       └── vercel.json
 │
+├── demo/                         Screenshot assets used in this README
 ├── render.yaml                   One-click Render deploy blueprint
 ├── DEPLOYMENT.md                 Full deployment guide
 ├── README.md
@@ -233,6 +231,15 @@ AI-Powered-Resume-JD-Matcher/
 ---
 
 ## Quick Start
+
+### Prerequisites
+
+| Tool | Version |
+|------|---------|
+| Python | 3.12.x |
+| uv | latest — `pip install uv` |
+| Node.js | 18+ |
+| Redis | any — `docker run -d -p 6379:6379 redis:alpine` |
 
 ### 1 — Clone
 
@@ -251,6 +258,9 @@ uv sync --dev --no-install-project
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
+- API: http://localhost:8000
+- Swagger UI: http://localhost:8000/docs
+
 ### 3 — Frontend
 
 ```bash
@@ -260,11 +270,15 @@ npm install
 npm run dev
 ```
 
+- App: http://localhost:3000
+
 ### 4 — Redis
 
 ```bash
 docker run -d -p 6379:6379 redis:alpine
 ```
+
+Redis failures are silent — the app degrades gracefully without caching.
 
 ---
 
@@ -275,19 +289,73 @@ cd apps/backend
 uv run pytest -v
 ```
 
-24 tests, ~22 seconds, no API keys or Redis needed.
+24 tests, ~22 seconds. No API keys, Redis, or live database needed — all external calls are mocked.
+
+```
+PASSED  test_health
+PASSED  test_register_and_login
+PASSED  test_login_wrong_password
+PASSED  test_me_unauthenticated
+PASSED  test_analyze_high_similarity
+PASSED  test_analyze_low_similarity
+PASSED  test_analyze_cache_hit
+PASSED  test_analyze_requires_auth
+PASSED  test_resume_parse
+PASSED  test_resume_parse_tfidf_keywords
+PASSED  test_keyword_extract
+PASSED  test_suggest
+PASSED  test_tailor_keywords_depth
+PASSED  test_tailor_all_depths
+PASSED  test_tailor_invalid_depth
+PASSED  test_cover_letter
+PASSED  test_cover_letter_all_tones
+PASSED  test_outreach_linkedin
+PASSED  test_outreach_all_platforms
+PASSED  test_batch_rank
+PASSED  test_history_returns_list
+PASSED  test_history_limit_param
+PASSED  test_history_invalid_limit
+PASSED  test_pdf_export_all_templates
+```
 
 ---
 
 ## Environment Variables
 
-See [DEPLOYMENT.md — Environment Variables Reference](DEPLOYMENT.md#5-environment-variables-reference).
+### Backend (`apps/backend/.env`)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SECRET_KEY` | **Yes** | — | JWT signing key, min 32 chars. Generate: `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `GEMINI_API_KEY` | **Yes** | — | Primary LLM. Free at [aistudio.google.com](https://aistudio.google.com/app/apikey) |
+| `GROQ_API_KEY` | No | — | First fallback. Free at [console.groq.com](https://console.groq.com) |
+| `OPENROUTER_API_KEY` | No | — | Second fallback. Free at [openrouter.ai](https://openrouter.ai) |
+| `REDIS_URL` | **Yes** | `redis://localhost:6379` | Redis connection string |
+| `DATABASE_URL` | **Yes** | `sqlite+aiosqlite:///./resume_matcher.db` | SQLite for dev, Neon PostgreSQL URL for prod |
+| `GEMINI_MODEL` | No | `gemini-2.0-flash` | |
+| `GROQ_MODEL` | No | `llama-3.3-70b-versatile` | |
+| `OPENROUTER_MODEL` | No | `meta-llama/llama-3.3-70b-instruct:free` | |
+| `LOW_SIMILARITY_THRESHOLD` | No | `0.25` | Cosine score below which LLM is skipped |
+| `CACHE_TTL` | No | `86400` | Cache TTL in seconds (24h) |
+
+### Frontend (`apps/frontend/.env.local`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | **Yes** | Backend base URL e.g. `http://localhost:8000` |
 
 ---
 
 ## API Reference
 
-All routes prefixed `/api/v1/`. Full interactive docs at `/docs` (Swagger) and `/redoc`.
+All routes prefixed `/api/v1/`.
+
+| Docs | URL |
+|------|-----|
+| Swagger UI (local) | [localhost:8000/docs](http://localhost:8000/docs) |
+| ReDoc (local) | [localhost:8000/redoc](http://localhost:8000/redoc) |
+| Swagger UI (prod) | [resume-matcher-api.onrender.com/docs](https://resume-matcher-api.onrender.com/docs) |
+| ReDoc (prod) | [resume-matcher-api.onrender.com/redoc](https://resume-matcher-api.onrender.com/redoc) |
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -307,14 +375,38 @@ All routes prefixed `/api/v1/`. Full interactive docs at `/docs` (Swagger) and `
 | `POST` | `/batch-rank` | Bearer | Rank N resumes vs 1 JD |
 | `GET` | `/health` | — | Liveness probe |
 
+A Postman collection and environment are included at the project root (`Resume Matcher.postman_collection.json` / `Resume Matcher.postman_environment.json`). The environment has both `{{baseUrl}}` (localhost) and `{{prodBaseUrl}}` (Render) — swap the variable in a request to test against production.
+
 ---
 
 ## Deployment
 
+Deployed on **Render** (backend) + **Vercel** (frontend) on free tiers. Database hosted on **Neon** (free tier PostgreSQL).
+
+| Service | URL |
+|---------|-----|
+| Frontend | [ai-powered-resume-jd-matcher-nyq5-cyan.vercel.app](https://ai-powered-resume-jd-matcher-nyq5-cyan.vercel.app) |
+| Backend API | `https://resume-matcher-api.onrender.com` |
+| Swagger UI | `https://resume-matcher-api.onrender.com/docs` |
+| Health check | `https://resume-matcher-api.onrender.com/health` |
+
 See **[DEPLOYMENT.md](DEPLOYMENT.md)** for:
-- Local dev setup
-- Docker / Docker Compose
-- Render (backend) + Vercel (frontend) — free tier, zero config
-- PostgreSQL migration
-- Getting free API keys
-- Troubleshooting
+- Docker / Docker Compose setup
+- Render one-click blueprint (`render.yaml`)
+- Neon PostgreSQL setup
+- Getting free API keys (Gemini / Groq / OpenRouter)
+- Troubleshooting guide
+
+### Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 14, React 18, Tailwind CSS, Recharts |
+| Backend | FastAPI, Python 3.12, SQLAlchemy async ORM |
+| Embeddings | sentence-transformers `all-MiniLM-L6-v2`, PyTorch CPU |
+| LLMs | Gemini 2.0 Flash → Groq llama-3.3-70b → OpenRouter llama-3.3-70b |
+| Database | Neon PostgreSQL (prod) / SQLite (dev) |
+| Cache | Redis (Render managed) |
+| PDF | ReportLab |
+| Auth | python-jose JWT + passlib bcrypt |
+| Deploy | Render (backend + Redis) + Vercel (frontend) + Neon (DB) |

@@ -23,6 +23,8 @@ engine = create_async_engine(
     echo=False,
     **_pool_kwargs,
     connect_args={"ssl": _ssl_ctx} if _is_pg else {},
+    # don't open connections at import time — wait until first use
+    pool_pre_ping=True,
 )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
