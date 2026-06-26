@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "meta-llama/llama-3.3-70b-instruct:free"
     redis_url: str = "redis://localhost:6379"
-    database_url: str = "sqlite+aiosqlite:///./resume_matcher.db"
+    database_url: str = "sqlite+aiosqlite:////tmp/resume_matcher.db"
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/0"
     low_similarity_threshold: float = 0.25
