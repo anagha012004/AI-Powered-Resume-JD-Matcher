@@ -4,13 +4,22 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.models.database import init_db
+from app.config import settings
 from app.routes import analyze, suggest, history, batch, auth, resume, builder
 from app.docs import DESCRIPTION, TAGS_METADATA
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    import logging
+    logger = logging.getLogger("uvicorn")
+    try:
+        logger.info(f"DB URL prefix: {settings.database_url[:30]}")
+        await init_db()
+        logger.info("Database tables created/verified successfully")
+    except Exception as e:
+        logger.error(f"init_db failed: {e}")
+        raise
     yield
 
 

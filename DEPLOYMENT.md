@@ -239,7 +239,7 @@ Re-deploy the backend after this change.
 | `GROQ_API_KEY` | No | First fallback LLM. Free at [console.groq.com](https://console.groq.com) |
 | `OPENROUTER_API_KEY` | No | Second fallback. Free at [openrouter.ai](https://openrouter.ai) |
 | `REDIS_URL` | **Yes** | `redis://localhost:6379` locally, or from Render/Upstash |
-| `DATABASE_URL` | **Yes** | `sqlite+aiosqlite:///./resume_matcher.db` (dev) or PostgreSQL URL (prod) |
+| `DATABASE_URL` | **Yes** | `sqlite+aiosqlite:///./resume_matcher.db` (dev) or Neon PostgreSQL URL (prod) |
 | `GEMINI_MODEL` | No | Default: `gemini-2.0-flash` |
 | `GROQ_MODEL` | No | Default: `llama-3.3-70b-versatile` |
 | `OPENROUTER_MODEL` | No | Default: `meta-llama/llama-3.3-70b-instruct:free` |
@@ -277,22 +277,23 @@ Having all three configured means the app stays up even when any one provider hi
 
 ## 7. PostgreSQL Migration
 
-Switch from SQLite to PostgreSQL for production by changing one env var:
+This project uses [Neon](https://neon.tech) as the managed PostgreSQL provider.
 
-```env
-DATABASE_URL=postgresql+asyncpg://user:password@host:5432/resume_matcher
-```
+### Getting a free Neon database
 
-Add the async driver:
+1. Go to [neon.tech](https://neon.tech) → **Sign up** (free tier: 0.5 GB storage, 1 compute)
+2. Create a new project → select a region closest to your Render service (e.g. `us-west-2` for Oregon)
+3. In the **Connection Details** panel, select **Connection string** and copy the URL
+4. It looks like:
+   ```
+   postgresql://user:password@ep-xxx.us-west-2.aws.neon.tech/neondb?sslmode=require
+   ```
 
-```bash
-cd apps/backend
-uv add asyncpg
-```
+### Setting the env var
+
+Paste the Neon URL as `DATABASE_URL` in your Render service's environment variables. The `database.py` module automatically rewrites it to `postgresql+asyncpg://...` and enables SSL.
 
 No code changes needed — SQLAlchemy handles the rest. The schema is created automatically on startup via `create_all`.
-
-**Render PostgreSQL**: Add a **PostgreSQL** add-on in the Render dashboard. The `DATABASE_URL` is injected automatically.
 
 ---
 
